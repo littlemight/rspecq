@@ -2,6 +2,7 @@ require "json"
 require "pathname"
 require "pp"
 require "open3"
+require "nokogiri"
 
 module RSpecQ
   # A Worker, given a build ID, continuously consumes tests off the
@@ -61,6 +62,9 @@ module RSpecQ
     # given in the command.
     attr_accessor :reproduction
 
+    # Output path for file, default is nil
+    attr_accessor :output_path
+
     attr_reader :queue
 
     def initialize(build_id:, worker_id:, redis_opts:)
@@ -91,6 +95,7 @@ module RSpecQ
       queue.wait_until_published(queue_wait_timeout)
       queue.save_worker_seed(@worker_id, seed)
 
+      job_id = 0
       loop do
         # we have to bootstrap this so that it can be used in the first call
         # to `requeue_lost_job` inside the work loop
@@ -106,12 +111,72 @@ module RSpecQ
         job = queue.reserve_job
 
         # build is finished
-        return if job.nil? && queue.exhausted?
+        if job.nil? && queue.exhausted?
+          testcase_results = []
+          total_tests = 0
+          total_skipped = 0
+          total_failures = 0
+          total_errors = 0
+          total_time = 0.0
+
+          result_seed = nil
+          result_hostname = nil
+          result_timestamp = nil
+
+          tc_struct = Struct.new(:classname, :name, :file, :time)
+
+          (1..job_id).each do |i|
+            i_result = Nokogiri::XML(File.open(get_output_filename(i)))
+            testsuite = i_result.xpath("//testsuite")
+
+            total_tests += testsuite.attr("tests").to_str.to_i
+            total_skipped += testsuite.attr("skipped").to_str.to_i
+            total_failures += testsuite.attr("failures").to_str.to_i
+            total_errors += testsuite.attr("errors").to_str.to_i
+            total_time += testsuite.attr("time").to_str.to_f
+
+            # assume same seed for everything for now
+            result_seed ||= testsuite.css("property[name='seed']").attr("value")
+            result_hostname ||= testsuite.attr("hostname").to_str
+            result_timestamp = testsuite.attr("timestamp").to_str
+
+            i_testcases = i_result.xpath("//testcase")
+            i_testcases.each do |i_testcase|
+              testcase_results.push tc_struct.new(
+                i_testcase.attr("classname"),
+                i_testcase.attr("name"),
+                i_testcase.attr("file"),
+                i_testcase.attr("time")
+              )
+            end
+
+            File.delete(get_output_filename(i))
+          end
+
+          builder = Nokogiri::XML::Builder.new(encoding: "UTF-8") do |xml|
+            xml.testsuite(name: "rspec", tests: total_tests, skipped: total_skipped, failures: total_failures,
+                          time: total_time, timestamp: result_timestamp, hostname: result_hostname) do
+              xml.properties do
+                xml.property(name: "seed", value: result_seed)
+              end
+              testcase_results.each do |testcase_result|
+                xml.testcase(classname: testcase_result.classname,
+                             name: testcase_result.name,
+                             file: testcase_result.file,
+                             time: testcase_result.time)
+              end
+            end
+          end
+          File.write(output_path, builder.to_xml)
+          return
+        end
 
         next if job.nil?
 
+        job_id += 1
+
         puts
-        puts "Executing #{job}"
+        puts "Executing job #{job_id}: #{job}"
 
         reset_rspec_state!
 
@@ -128,12 +193,21 @@ module RSpecQ
         end
 
         options = ["--format", "progress", job]
+        if output_path
+          options.push("--format", "RspecJunitFormatter", "-o", get_output_filename(job_id))
+        end
         tags.each { |tag| options.push("--tag", tag) }
         opts = RSpec::Core::ConfigurationOptions.new(options)
         _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
 
         queue.acknowledge_job(job)
       end
+    end
+
+    def get_output_filename(job_id)
+      ext = File.extname(output_path)
+      basename = File.basename(output_path, ext)
+      File.join(File.dirname(output_path), "#{basename}_#{job_id}#{ext}")
     end
 
     # Update the worker heartbeat if necessary
@@ -157,7 +231,6 @@ module RSpecQ
       end
       RSpec.configuration.files_or_directories_to_run = files_or_dirs_to_run
       files_to_run = RSpec.configuration.files_to_run.map { |j| relative_path(j) }
-
       timings = queue.timings
       if timings.empty?
         q_size = queue.publish(files_to_run.shuffle, fail_fast)
