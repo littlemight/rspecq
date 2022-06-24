@@ -215,6 +215,7 @@ module RSpecQ
       if @heartbeat_updated_at.nil? || elapsed(@heartbeat_updated_at) >= HEARTBEAT_FREQUENCY
         queue.record_worker_heartbeat
         @heartbeat_updated_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        puts "Heartbeat updated at #{@heartbeat_updated_at}"
       end
     end
 
