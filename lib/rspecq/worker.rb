@@ -150,24 +150,24 @@ module RSpecQ
               )
             end
 
-            File.delete(get_output_filename(i))
+            # File.delete(get_output_filename(i))
           end
 
-          builder = Nokogiri::XML::Builder.new(encoding: "UTF-8") do |xml|
-            xml.testsuite(name: "rspec", tests: total_tests, skipped: total_skipped, failures: total_failures,
-                          time: total_time, timestamp: result_timestamp, hostname: result_hostname) do
-              xml.properties do
-                xml.property(name: "seed", value: result_seed)
-              end
-              testcase_results.each do |testcase_result|
-                xml.testcase(classname: testcase_result.classname,
-                             name: testcase_result.name,
-                             file: testcase_result.file,
-                             time: testcase_result.time)
-              end
-            end
-          end
-          File.write(output_path, builder.to_xml)
+          # builder = Nokogiri::XML::Builder.new(encoding: "UTF-8") do |xml|
+          #   xml.testsuite(name: "rspec", tests: total_tests, skipped: total_skipped, failures: total_failures,
+          #                 time: total_time, timestamp: result_timestamp, hostname: result_hostname) do
+          #     xml.properties do
+          #       xml.property(name: "seed", value: result_seed)
+          #     end
+          #     testcase_results.each do |testcase_result|
+          #       xml.testcase(classname: testcase_result.classname,
+          #                    name: testcase_result.name,
+          #                    file: testcase_result.file,
+          #                    time: testcase_result.time)
+          #     end
+          #   end
+          # end
+          # File.write(output_path, builder.to_xml)
           return
         end
 
