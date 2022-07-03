@@ -3,6 +3,7 @@ require "pathname"
 require "pp"
 require "open3"
 require "nokogiri"
+require "benchmark"
 
 module RSpecQ
   # A Worker, given a build ID, continuously consumes tests off the
@@ -91,117 +92,127 @@ module RSpecQ
     def work
       puts "Working for build #{@build_id} (worker=#{@worker_id})"
 
-      try_publish_queue!(queue)
-      queue.wait_until_published(queue_wait_timeout)
-      queue.save_worker_seed(@worker_id, seed)
+      benchmark_results = []
+
+      benchmark_results.push(Benchmark.measure("Waiting queue to be ready") do
+        try_publish_queue!(queue)
+        queue.wait_until_published(queue_wait_timeout)
+        queue.save_worker_seed(@worker_id, seed)
+      end)
 
       job_id = 0
-      loop do
-        # we have to bootstrap this so that it can be used in the first call
-        # to `requeue_lost_job` inside the work loop
-        update_heartbeat
 
-        return if queue.build_failed_fast?
+      benchmark_results.push(Benchmark.measure("Waiting queue to be empty") do
+        loop do
+          # we have to bootstrap this so that it can be used in the first call
+          # to `requeue_lost_job` inside the work loop
+          update_heartbeat
 
-        lost = queue.requeue_lost_job
-        puts "Requeued lost job: #{lost}" if lost
+          return if queue.build_failed_fast?
 
-        # TODO: can we make `reserve_job` also act like exhausted? and get
-        # rid of `exhausted?` (i.e. return false if no jobs remain)
-        job = queue.reserve_job
+          lost = queue.requeue_lost_job
+          puts "Requeued lost job: #{lost}" if lost
 
-        # build is finished
-        if job.nil? && queue.exhausted?
-          testcase_results = []
-          total_tests = 0
-          total_skipped = 0
-          total_failures = 0
-          total_errors = 0
-          total_time = 0.0
+          # TODO: can we make `reserve_job` also act like exhausted? and get
+          # rid of `exhausted?` (i.e. return false if no jobs remain)
+          job = queue.reserve_job
 
-          result_seed = nil
-          result_hostname = nil
-          result_timestamp = nil
+          # build is finished
+          if job.nil? && queue.exhausted?
+            testcase_results = []
+            total_tests = 0
+            total_skipped = 0
+            total_failures = 0
+            total_errors = 0
+            total_time = 0.0
 
-          tc_struct = Struct.new(:classname, :name, :file, :time)
+            result_seed = nil
+            result_hostname = nil
+            result_timestamp = nil
 
-          (1..job_id).each do |i|
-            i_result = Nokogiri::XML(File.open(get_output_filename(i)))
-            testsuite = i_result.xpath("//testsuite")
+            tc_struct = Struct.new(:classname, :name, :file, :time)
 
-            total_tests += testsuite.attr("tests").to_str.to_i
-            total_skipped += testsuite.attr("skipped").to_str.to_i
-            total_failures += testsuite.attr("failures").to_str.to_i
-            total_errors += testsuite.attr("errors").to_str.to_i
-            total_time += testsuite.attr("time").to_str.to_f
+            (1..job_id).each do |i|
+              i_result = Nokogiri::XML(File.open(get_output_filename(i)))
+              testsuite = i_result.xpath("//testsuite")
 
-            # assume same seed for everything for now
-            result_seed ||= testsuite.css("property[name='seed']").attr("value")
-            result_hostname ||= testsuite.attr("hostname").to_str
-            result_timestamp = testsuite.attr("timestamp").to_str
+              total_tests += testsuite.attr("tests").to_str.to_i
+              total_skipped += testsuite.attr("skipped").to_str.to_i
+              total_failures += testsuite.attr("failures").to_str.to_i
+              total_errors += testsuite.attr("errors").to_str.to_i
+              total_time += testsuite.attr("time").to_str.to_f
 
-            i_testcases = i_result.xpath("//testcase")
-            i_testcases.each do |i_testcase|
-              testcase_results.push tc_struct.new(
-                i_testcase.attr("classname"),
-                i_testcase.attr("name"),
-                i_testcase.attr("file"),
-                i_testcase.attr("time")
-              )
+              # assume same seed for everything for now
+              result_seed ||= testsuite.css("property[name='seed']").attr("value")
+              result_hostname ||= testsuite.attr("hostname").to_str
+              result_timestamp = testsuite.attr("timestamp").to_str
+
+              i_testcases = i_result.xpath("//testcase")
+              i_testcases.each do |i_testcase|
+                testcase_results.push tc_struct.new(
+                  i_testcase.attr("classname"),
+                  i_testcase.attr("name"),
+                  i_testcase.attr("file"),
+                  i_testcase.attr("time")
+                )
+              end
+
+              # File.delete(get_output_filename(i))
             end
 
-            # File.delete(get_output_filename(i))
+            # builder = Nokogiri::XML::Builder.new(encoding: "UTF-8") do |xml|
+            #   xml.testsuite(name: "rspec", tests: total_tests, skipped: total_skipped, failures: total_failures,
+            #                 time: total_time, timestamp: result_timestamp, hostname: result_hostname) do
+            #     xml.properties do
+            #       xml.property(name: "seed", value: result_seed)
+            #     end
+            #     testcase_results.each do |testcase_result|
+            #       xml.testcase(classname: testcase_result.classname,
+            #                    name: testcase_result.name,
+            #                    file: testcase_result.file,
+            #                    time: testcase_result.time)
+            #     end
+            #   end
+            # end
+            # File.write(output_path, builder.to_xml)
+            break
           end
 
-          # builder = Nokogiri::XML::Builder.new(encoding: "UTF-8") do |xml|
-          #   xml.testsuite(name: "rspec", tests: total_tests, skipped: total_skipped, failures: total_failures,
-          #                 time: total_time, timestamp: result_timestamp, hostname: result_hostname) do
-          #     xml.properties do
-          #       xml.property(name: "seed", value: result_seed)
-          #     end
-          #     testcase_results.each do |testcase_result|
-          #       xml.testcase(classname: testcase_result.classname,
-          #                    name: testcase_result.name,
-          #                    file: testcase_result.file,
-          #                    time: testcase_result.time)
-          #     end
-          #   end
-          # end
-          # File.write(output_path, builder.to_xml)
-          return
+          next if job.nil?
+
+          job_id += 1
+
+          puts
+          puts "Executing job #{job_id}: #{job}"
+
+          reset_rspec_state!
+
+          # reconfigure rspec
+          RSpec.configuration.detail_color = :magenta
+          RSpec.configuration.seed = seed
+          RSpec.configuration.backtrace_formatter.filter_gem("rspecq")
+          RSpec.configuration.add_formatter(Formatters::FailureRecorder.new(queue, job, max_requeues, @worker_id))
+          RSpec.configuration.add_formatter(Formatters::ExampleCountRecorder.new(queue))
+          RSpec.configuration.add_formatter(Formatters::WorkerHeartbeatRecorder.new(self))
+
+          if populate_timings
+            RSpec.configuration.add_formatter(Formatters::JobTimingRecorder.new(queue, job))
+          end
+
+          options = ["--format", "progress", job]
+          if output_path
+            options.push("--format", "RspecJunitFormatter", "-o", get_output_filename(job_id))
+          end
+          tags.each { |tag| options.push("--tag", tag) }
+          opts = RSpec::Core::ConfigurationOptions.new(options)
+          _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
+
+          queue.acknowledge_job(job)
         end
+      end)
 
-        next if job.nil?
-
-        job_id += 1
-
-        puts
-        puts "Executing job #{job_id}: #{job}"
-
-        reset_rspec_state!
-
-        # reconfigure rspec
-        RSpec.configuration.detail_color = :magenta
-        RSpec.configuration.seed = seed
-        RSpec.configuration.backtrace_formatter.filter_gem("rspecq")
-        RSpec.configuration.add_formatter(Formatters::FailureRecorder.new(queue, job, max_requeues, @worker_id))
-        RSpec.configuration.add_formatter(Formatters::ExampleCountRecorder.new(queue))
-        RSpec.configuration.add_formatter(Formatters::WorkerHeartbeatRecorder.new(self))
-
-        if populate_timings
-          RSpec.configuration.add_formatter(Formatters::JobTimingRecorder.new(queue, job))
-        end
-
-        options = ["--format", "progress", job]
-        if output_path
-          options.push("--format", "RspecJunitFormatter", "-o", get_output_filename(job_id))
-        end
-        tags.each { |tag| options.push("--tag", tag) }
-        opts = RSpec::Core::ConfigurationOptions.new(options)
-        _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
-
-        queue.acknowledge_job(job)
-      end
+      # CPU time, system CPU time, the sum of the user and system CPU times, and the elapsed real time
+      benchmark_results.each { |benchmark_result| puts(benchmark_result.label, benchmark_result) }
     end
 
     def get_output_filename(job_id)
