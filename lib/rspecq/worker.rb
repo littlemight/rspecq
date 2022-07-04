@@ -2,7 +2,6 @@ require "json"
 require "pathname"
 require "pp"
 require "open3"
-require "nokogiri"
 
 module RSpecQ
   # A Worker, given a build ID, continuously consumes tests off the
@@ -111,65 +110,7 @@ module RSpecQ
         job = queue.reserve_job
 
         # build is finished
-        if job.nil? && queue.exhausted?
-          testcase_results = []
-          total_tests = 0
-          total_skipped = 0
-          total_failures = 0
-          total_errors = 0
-          total_time = 0.0
-
-          result_seed = nil
-          result_hostname = nil
-          result_timestamp = nil
-
-          tc_struct = Struct.new(:classname, :name, :file, :time)
-
-          (1..job_id).each do |i|
-            i_result = Nokogiri::XML(File.open(get_output_filename(i)))
-            testsuite = i_result.xpath("//testsuite")
-
-            total_tests += testsuite.attr("tests").to_str.to_i
-            total_skipped += testsuite.attr("skipped").to_str.to_i
-            total_failures += testsuite.attr("failures").to_str.to_i
-            total_errors += testsuite.attr("errors").to_str.to_i
-            total_time += testsuite.attr("time").to_str.to_f
-
-            # assume same seed for everything for now
-            result_seed ||= testsuite.css("property[name='seed']").attr("value")
-            result_hostname ||= testsuite.attr("hostname").to_str
-            result_timestamp = testsuite.attr("timestamp").to_str
-
-            i_testcases = i_result.xpath("//testcase")
-            i_testcases.each do |i_testcase|
-              testcase_results.push tc_struct.new(
-                i_testcase.attr("classname"),
-                i_testcase.attr("name"),
-                i_testcase.attr("file"),
-                i_testcase.attr("time")
-              )
-            end
-
-            # File.delete(get_output_filename(i))
-          end
-
-          # builder = Nokogiri::XML::Builder.new(encoding: "UTF-8") do |xml|
-          #   xml.testsuite(name: "rspec", tests: total_tests, skipped: total_skipped, failures: total_failures,
-          #                 time: total_time, timestamp: result_timestamp, hostname: result_hostname) do
-          #     xml.properties do
-          #       xml.property(name: "seed", value: result_seed)
-          #     end
-          #     testcase_results.each do |testcase_result|
-          #       xml.testcase(classname: testcase_result.classname,
-          #                    name: testcase_result.name,
-          #                    file: testcase_result.file,
-          #                    time: testcase_result.time)
-          #     end
-          #   end
-          # end
-          # File.write(output_path, builder.to_xml)
-          return
-        end
+        return if job.nil? && queue.exhausted?
 
         next if job.nil?
 
