@@ -268,6 +268,7 @@ module RSpecQ
         return files
       end
       out = out.split("Coverage report generated for RSpec")[0] # ! hack, not good :)
+      puts(out)
       JSON.parse(out)["examples"].map { |e| e["id"] }
     end
 
