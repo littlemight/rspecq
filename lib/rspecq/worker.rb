@@ -2,6 +2,7 @@ require "json"
 require "pathname"
 require "pp"
 require "open3"
+require "nokogiri"
 
 module RSpecQ
   # A Worker, given a build ID, continuously consumes tests off the
@@ -110,7 +111,14 @@ module RSpecQ
         job = queue.reserve_job
 
         # build is finished
-        return if job.nil? && queue.exhausted?
+        if job.nil? && queue.exhausted?
+
+          # the junit_merge formatting is bad, reformatting with Nokogiri
+          res = Nokogiri::XML(File.open(get_output_filename(1)), &:noblanks).to_xml
+          File.write(output_path, res)
+          File.delete(get_output_filename(1))
+          return
+        end
 
         next if job.nil?
 
@@ -142,6 +150,14 @@ module RSpecQ
         _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
 
         queue.acknowledge_job(job)
+
+        # ! very bad solution, this will do for now :(
+        next unless job_id != 1
+
+        # merge everything to rspec_1.xml
+        cmd = "bundle exec junit_merge #{get_output_filename(job_id)} #{get_output_filename(1)}"
+        Open3.capture3(cmd)
+        File.delete(get_output_filename(job_id))
       end
     end
 
@@ -267,8 +283,8 @@ module RSpecQ
 
         return files
       end
+
       out = out.split("Coverage report generated for RSpec")[0] # ! hack, not good :)
-      puts(out)
       JSON.parse(out)["examples"].map { |e| e["id"] }
     end
 

@@ -18,6 +18,8 @@ Gem::Specification.new do |s|
     s.add_dependency "rspec-core", ">= 3.8.0"
   end
 
+  s.add_dependency "junit_merge", "~> 0.1.2"
+  s.add_dependency "nokogiri"
   s.add_dependency "redis"
   s.add_dependency "rspec_junit_formatter"
   s.add_dependency "sentry-ruby"
