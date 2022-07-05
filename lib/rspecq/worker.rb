@@ -267,7 +267,7 @@ module RSpecQ
 
         return files
       end
-
+      puts out
       JSON.parse(out)["examples"].map { |e| e["id"] }
     end
 
