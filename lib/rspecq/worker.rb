@@ -245,7 +245,7 @@ module RSpecQ
     # falling back to scheduling them as whole files. Their errors will be
     # reported in the normal flow when they're eventually picked up by a worker.
     def files_to_example_ids(files)
-      cmd = "DISABLE_SPRING=1 bundle exec rspec --dry-run --format json #{files.join(' ')}"
+      cmd = "DISABLE_SPRING=1 COVERAGE='' bundle exec rspec --dry-run --format json #{files.join(' ')}"
       out, err, cmd_result = Open3.capture3(cmd)
 
       if !cmd_result.success?
@@ -267,7 +267,7 @@ module RSpecQ
 
         return files
       end
-      puts out
+      out = out.split("Coverage report generated for RSpec")[0] # ! hack, not good :)
       JSON.parse(out)["examples"].map { |e| e["id"] }
     end
 
