@@ -3,8 +3,8 @@ require "pathname"
 require "pp"
 require "open3"
 require "nokogiri"
-require "ruby-prof"
-require "memory_profiler"
+# require "ruby-prof"
+# require "memory_profiler"
 
 module RSpecQ
   # A Worker, given a build ID, continuously consumes tests off the
