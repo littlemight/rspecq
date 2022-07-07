@@ -99,7 +99,7 @@ module RSpecQ
 
       job_id = 0
       # RubyProf.start
-      ori_config = RSpec.configuration.clone
+      ori_config = nil
 
       # MemoryProfiler.start
       loop do
@@ -136,7 +136,9 @@ module RSpecQ
         reset_rspec_state!
 
         # reconfigure rspec
-        RSpec.configuration = ori_config.clone
+        if !ori_config.nil?
+          RSpec.configuration = ori_config.clone
+        end
         RSpec.configuration.detail_color = :magenta
         RSpec.configuration.seed = seed
         RSpec.configuration.backtrace_formatter.filter_gem("rspecq")
@@ -155,6 +157,9 @@ module RSpecQ
         tags.each { |tag| options.push("--tag", tag) }
         opts = RSpec::Core::ConfigurationOptions.new(options)
         _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
+        if ori_config.nil
+          ori_config = RSpec.configuration.clone
+        end
 
         queue.acknowledge_job(job)
 
