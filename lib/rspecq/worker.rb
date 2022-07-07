@@ -157,7 +157,7 @@ module RSpecQ
         tags.each { |tag| options.push("--tag", tag) }
         opts = RSpec::Core::ConfigurationOptions.new(options)
         _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
-        if ori_config.nil
+        if ori_config.nil?
           ori_config = RSpec.configuration.clone
         end
 
