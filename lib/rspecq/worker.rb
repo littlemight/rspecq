@@ -3,8 +3,6 @@ require "pathname"
 require "pp"
 require "open3"
 require "nokogiri"
-# require "ruby-prof"
-# require "memory_profiler"
 
 module RSpecQ
   # A Worker, given a build ID, continuously consumes tests off the
@@ -98,10 +96,7 @@ module RSpecQ
       queue.save_worker_seed(@worker_id, seed)
 
       job_id = 0
-      # RubyProf.start
-      ori_config = nil
 
-      # MemoryProfiler.start
       loop do
         # we have to bootstrap this so that it can be used in the first call
         # to `requeue_lost_job` inside the work loop
@@ -136,9 +131,6 @@ module RSpecQ
         reset_rspec_state!
 
         # reconfigure rspec
-        if !ori_config.nil?
-          RSpec.configuration = ori_config.clone
-        end
         RSpec.configuration.detail_color = :magenta
         RSpec.configuration.seed = seed
         RSpec.configuration.backtrace_formatter.filter_gem("rspecq")
@@ -157,9 +149,6 @@ module RSpecQ
         tags.each { |tag| options.push("--tag", tag) }
         opts = RSpec::Core::ConfigurationOptions.new(options)
         _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
-        if ori_config.nil?
-          ori_config = RSpec.configuration.clone
-        end
 
         queue.acknowledge_job(job)
 
