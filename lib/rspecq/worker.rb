@@ -115,9 +115,9 @@ module RSpecQ
         if job.nil? && queue.exhausted?
 
           # the junit_merge formatting is bad, reformatting with Nokogiri
-          res = Nokogiri::XML(File.open(get_output_filename(1)), &:noblanks).to_xml
-          File.write(output_path, res)
-          File.delete(get_output_filename(1))
+          # res = Nokogiri::XML(File.open(get_output_filename(1)), &:noblanks).to_xml
+          # File.write(output_path, res)
+          # File.delete(get_output_filename(1))
           return
         end
 
@@ -152,13 +152,13 @@ module RSpecQ
 
         queue.acknowledge_job(job)
 
-        # ! very bad solution, this will do for now :(
-        next unless job_id != 1
+        # # ! very bad solution, this will do for now :(
+        # next unless job_id != 1
 
-        # merge everything to rspec_1.xml
-        cmd = "bundle exec junit_merge #{get_output_filename(job_id)} #{get_output_filename(1)}"
-        Open3.capture3(cmd)
-        File.delete(get_output_filename(job_id))
+        # # merge everything to rspec_1.xml
+        # cmd = "bundle exec junit_merge #{get_output_filename(job_id)} #{get_output_filename(1)}"
+        # Open3.capture3(cmd)
+        # File.delete(get_output_filename(job_id))
       end
     end
 
