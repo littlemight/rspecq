@@ -15,7 +15,7 @@ Gem::Specification.new do |s|
   if ENV["CI"] && ENV["RSPEC_CORE"]
     s.add_dependency "rspec-core", ENV["RSPEC_CORE"]
   else
-    s.add_dependency "rspec-core", ">= 3.11.0" # fixes memory leak?
+    s.add_dependency "rspec-core", ">= 3.8.0"
   end
 
   s.add_dependency "junit_merge", "~> 0.1.2"
