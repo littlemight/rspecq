@@ -61,6 +61,9 @@ module RSpecQ
     # given in the command.
     attr_accessor :reproduction
 
+    # Output path for file, default is nil
+    attr_accessor :output_path
+
     attr_reader :queue
 
     def initialize(build_id:, worker_id:, redis_opts:)
@@ -91,6 +94,8 @@ module RSpecQ
       queue.wait_until_published(queue_wait_timeout)
       queue.save_worker_seed(@worker_id, seed)
 
+      job_id = 0
+
       loop do
         # we have to bootstrap this so that it can be used in the first call
         # to `requeue_lost_job` inside the work loop
@@ -110,8 +115,10 @@ module RSpecQ
 
         next if job.nil?
 
+        job_id += 1
+
         puts
-        puts "Executing #{job}"
+        puts "Executing job #{job_id}: #{job}"
 
         reset_rspec_state!
 
@@ -128,6 +135,9 @@ module RSpecQ
         end
 
         options = ["--format", "progress", job]
+        if output_path
+          options.push("--format", "RspecJunitFormatter", "-o", get_output_filename(job_id))
+        end
         tags.each { |tag| options.push("--tag", tag) }
         opts = RSpec::Core::ConfigurationOptions.new(options)
         _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
@@ -136,11 +146,18 @@ module RSpecQ
       end
     end
 
+    def get_output_filename(job_id)
+      ext = File.extname(output_path)
+      basename = File.basename(output_path, ext)
+      File.join(File.dirname(output_path), "#{basename}_#{job_id}#{ext}")
+    end
+
     # Update the worker heartbeat if necessary
     def update_heartbeat
       if @heartbeat_updated_at.nil? || elapsed(@heartbeat_updated_at) >= HEARTBEAT_FREQUENCY
         queue.record_worker_heartbeat
         @heartbeat_updated_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        puts "Heartbeat updated at #{@heartbeat_updated_at}"
       end
     end
 
@@ -157,7 +174,6 @@ module RSpecQ
       end
       RSpec.configuration.files_or_directories_to_run = files_or_dirs_to_run
       files_to_run = RSpec.configuration.files_to_run.map { |j| relative_path(j) }
-
       timings = queue.timings
       if timings.empty?
         q_size = queue.publish(files_to_run.shuffle, fail_fast)
@@ -230,7 +246,7 @@ module RSpecQ
     # falling back to scheduling them as whole files. Their errors will be
     # reported in the normal flow when they're eventually picked up by a worker.
     def files_to_example_ids(files)
-      cmd = "DISABLE_SPRING=1 bundle exec rspec --dry-run --format json #{files.join(' ')}"
+      cmd = "DISABLE_SPRING=1 SUPPRESS_OUTPUT=1 bundle exec rspec --dry-run --format json #{files.join(' ')}"
       out, err, cmd_result = Open3.capture3(cmd)
 
       if !cmd_result.success?
@@ -253,6 +269,7 @@ module RSpecQ
         return files
       end
 
+      out = out.split("Coverage report generated for RSpec")[0] # ! hack, not good :)
       JSON.parse(out)["examples"].map { |e| e["id"] }
     end
 
