@@ -23,6 +23,7 @@ Gem::Specification.new do |s|
   s.add_dependency "redis"
   s.add_dependency "rspec_junit_formatter"
   s.add_dependency "sentry-ruby"
+  s.add_dependency "ruby-prof"
 
   s.add_development_dependency "minitest"
   s.add_development_dependency "pry-byebug"

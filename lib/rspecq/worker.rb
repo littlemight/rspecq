@@ -3,6 +3,8 @@ require "pathname"
 require "pp"
 require "open3"
 require "nokogiri"
+require "ruby-prof"
+require "objspace"
 
 module RSpecQ
   # A Worker, given a build ID, continuously consumes tests off the
@@ -88,6 +90,11 @@ module RSpecQ
       RSpec::Core::Formatters.register(Formatters::WorkerHeartbeatRecorder, :example_finished)
     end
 
+    def usage
+      rss = `ps -p #{Process.pid} -o rss -h`.strip.to_i * 1024
+      puts "RSS: #{rss / 1024} ObjectSpace size #{ObjectSpace.memsize_of_all / 1024}"
+    end
+
     def work
       puts "Working for build #{@build_id} (worker=#{@worker_id})"
 
@@ -97,6 +104,9 @@ module RSpecQ
 
       job_id = 0
 
+      # RubyProf.measure_mode = RubyProf::ALLOCATIONS
+      ObjectSpace.trace_object_allocations_start
+      # result = RubyProf.profile(track_allocations: true) do
       loop do
         # we have to bootstrap this so that it can be used in the first call
         # to `requeue_lost_job` inside the work loop
@@ -118,6 +128,11 @@ module RSpecQ
           # res = Nokogiri::XML(File.open(get_output_filename(1)), &:noblanks).to_xml
           # File.write(output_path, res)
           # File.delete(get_output_filename(1))
+          # usage
+          io = File.open("run.dump", "w")
+          ObjectSpace.dump_all(output: io)
+          io.close
+          # puts((GC.stat[:heap_free_slots] * GC::INTERNAL_CONSTANTS[:RVALUE_SIZE]) + ObjectSpace.memsize_of_all)
           return
         end
 
@@ -143,23 +158,28 @@ module RSpecQ
         end
 
         options = ["--format", "progress", job]
-        if output_path
-          options.push("--format", "RspecJunitFormatter", "-o", get_output_filename(job_id))
-        end
+        # if output_path
+        #   options.push("--format", "RspecJunitFormatter", "-o", get_output_filename(job_id))
+        # end
         tags.each { |tag| options.push("--tag", tag) }
         opts = RSpec::Core::ConfigurationOptions.new(options)
         _result = RSpec::Core::Runner.new(opts).run($stderr, $stdout)
 
         queue.acknowledge_job(job)
+        usage
 
-        # # ! very bad solution, this will do for now :(
-        # next unless job_id != 1
+        # next unless job_id == 50
 
-        # # merge everything to rspec_1.xml
-        # cmd = "bundle exec junit_merge #{get_output_filename(job_id)} #{get_output_filename(1)}"
-        # Open3.capture3(cmd)
-        # File.delete(get_output_filename(job_id))
+        # if we run more than 50 it'll most likely fail, so save the result when it hits 50 for now
+
+        # prof_result = RubyProf.stop
+        # printer = RubyProf::GraphHtmlPrinter.new(prof_result)
+        # printer.print(File.new("report.html", "w+"))
+        # break
+        # end
       end
+      # printer = RubyProf::GraphHtmlPrinter.new(result)
+      # printer.print(File.new("report.html", "w+"))
     end
 
     def get_output_filename(job_id)

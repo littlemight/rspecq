@@ -1,0 +1,1 @@
+bundle exec rspecq --build=1 --seed 1 --worker=1 --update-timings --file-split-threshold 0 --output=results/rspec.xml test/sample_suites/timings/spec/my_spec.rb
