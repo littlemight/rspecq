@@ -216,6 +216,9 @@ module RSpecQ
         # HEURISTIC: put jobs without previous timings (e.g. a newly added
         # spec file) in the middle of the queue
         h[j] = timings[j] || default_timing
+        if j.split.length > 1
+          h[j] = 999_999 # force to put in front
+        end
       end
 
       # sort jobs based on their timings (slowest to be processed first)
